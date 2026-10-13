@@ -1,0 +1,38 @@
+
+name: EcoBridge CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  documentation-check:
+    name: Validate project documentation
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Verify required documents
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          test -s README.md
+          test -s docs/ARCHITECTURE.md
+          test -s docs/PROTOCOL.md
+
+          grep -q "## MVP" docs/ARCHITECTURE.md
+          grep -q "## Security" docs/ARCHITECTURE.md
+          grep -q "## Message Families" docs/PROTOCOL.md
+          grep -q "## Transfer Requirements" docs/PROTOCOL.md
+
+          echo "Required documentation checks passed."
