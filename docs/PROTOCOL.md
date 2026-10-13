@@ -131,3 +131,57 @@ A device's trust status is independent of its proximity and connection status. I
 ## 10. Implementation Status
 
 This specification describes required behavior. A message type is not considered implemented until it has working code, relevant automated tests, and device-level verification where applicable.
+
+## 11. Wire Contract: EBP/1
+
+The framing contract is defined in `docs/TRANSPORT.md`. This section assigns the numeric frame types and establishes stream semantics.
+
+### Frame type IDs
+
+| ID | Name | Purpose |
+|---:|---|---|
+| `0x01` | `HELLO` | Initial protocol negotiation |
+| `0x02` | `AUTH` | Application identity-binding checks |
+| `0x03` | `CONTROL` | Bounded CBOR control messages |
+| `0x04` | `DATA` | Binary transfer data |
+| `0x05` | `WINDOW_UPDATE` | Receiver flow-control updates |
+| `0x06` | `CANCEL` | Cancel an operation or transfer |
+| `0x07` | `ERROR` | Structured error response |
+
+Unknown frame types must be rejected.
+
+### Stream IDs
+
+- Stream ID `0` is reserved for connection-level control traffic.
+- Nonzero stream IDs identify individual operations or transfers.
+- Stream IDs must not be reused within a connection.
+- Sequence numbers begin at zero for each stream and increase by one for each frame on that stream.
+- Sequence-number wraparound is forbidden; terminate the stream before it occurs.
+- Receivers reject invalid ordering and unexpected stream IDs.
+
+The implementation must define the exact legal frame types for each stream state.
+
+### Payload rules
+
+- `HELLO`, `AUTH`, `CONTROL`, `WINDOW_UPDATE`, `CANCEL`, and `ERROR` use bounded CBOR payloads, except where a message is explicitly defined as empty.
+- `DATA` carries raw binary content.
+- The header payload length is the number of bytes after the 24-byte header.
+- Control frames are limited to 64 KiB; data frames are limited to 1 MiB.
+- The receiver validates the frame type, stream state, length, and sequence number before accepting the payload.
+
+### CBOR control envelope
+
+Control messages use a versioned CBOR map containing:
+
+- `version`: application protocol version.
+- `type`: defined message name.
+- `request_id`: request/response correlation identifier where applicable.
+- `payload`: message-specific fields.
+
+Required fields, field types, maximum nesting, permitted map sizes, and unknown-field handling must be specified for each message before that message is implemented. Use a maintained CBOR implementation rather than writing a custom decoder.
+
+### Interoperability requirement
+
+The Rust and Kotlin implementations must consume the same golden test vectors. Each vector specifies the input fields, expected encoded bytes, and expected decoding result or rejection.
+
+A passing test on one platform is insufficient. Both implementations must pass the shared vectors before EBP/1 framing is considered interoperable.
