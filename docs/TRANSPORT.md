@@ -128,4 +128,146 @@ Initial implementation limits:
 - Data payload: at most 1 MiB.
 - Initial target data chunk: 256 KiB.
 - Initial maximum concurrent outgoing transfers: 2.
-- Initial
+- Initial maximum concurrent incoming transfers: 2.
+- Initial in-flight data budget: configurable, bounded per connection.
+- All queues must have explicit capacity limits.
+
+These are conservative initial limits, not proven optimal values. Benchmarks may justify changing them.
+
+When the receiver cannot accept more data, it must stop granting additional capacity. The sender must respect the advertised window rather than accumulate unbounded buffers.
+
+Resource exhaustion must produce a controlled error, not an uncontrolled memory increase or application crash.
+
+## 8. Small-File Efficiency
+
+To reduce latency:
+
+- Reuse an established authenticated connection.
+- Avoid repeating TLS handshakes for every file.
+- Batch related control metadata when doing so preserves clear error handling.
+- Avoid base64 encoding binary data.
+- Avoid unnecessary per-chunk allocations and copies.
+- Do not perform synchronous disk or network operations on UI threads.
+- Avoid mandatory round trips for every chunk where bounded flow control can safely permit pipelining.
+
+Small-file transfers must still receive authorization and integrity verification. Performance optimizations must not bypass security checks.
+
+## 9. Large-File Transfer
+
+- Stream data from source to network and network to destination.
+- Never load an entire file into memory.
+- Use bounded reusable buffers.
+- Apply backpressure when the receiver, disk, or network cannot keep up.
+- Compute a standard cryptographic content hash incrementally.
+- Track expected file size and bytes accepted.
+- Detect premature EOF and excess data.
+- Write to a temporary destination.
+- Finalize the destination only after content verification and successful completion.
+- Clean up partial files safely after cancellation or unrecoverable failure.
+
+The transfer engine must distinguish bytes sent, bytes received, bytes written, and verified completion. These are not interchangeable progress metrics.
+
+## 10. Integrity and Completion
+
+A transfer descriptor includes:
+
+- Unique transfer ID.
+- Authorized source and destination references.
+- Expected size.
+- Agreed integrity algorithm and expected digest.
+- Transfer state and permitted recovery metadata.
+
+The receiver must independently verify the received content. An acknowledgment of received bytes is not proof that the complete file is valid.
+
+`TRANSFER_FINISH` must not imply success by itself. Success is reported only after the receiver validates the final size and digest and successfully finalizes the destination.
+
+A connection failure during finalization must not produce an ambiguous success result. The transfer status must be recoverable through a defined status query.
+
+## 11. Cancellation, Reconnect, and Resume
+
+Cancellation is a state transition, not merely closing a socket.
+
+- Stop accepting new chunks for a cancelled transfer.
+- Release associated buffers and resources.
+- Clean up incomplete destination files unless a valid resume record is retained.
+- Ignore or reject late data according to the defined transfer state.
+- Return a terminal outcome that accurately reports whether cancellation completed.
+
+Reconnect policy:
+
+- Use bounded exponential backoff with jitter.
+- Never retry authentication failures indefinitely.
+- Require fresh session authentication after reconnection.
+- Do not reuse an old session as proof of a new authenticated connection.
+
+Resume policy:
+
+- Revalidate device identity and transfer authorization.
+- Verify the identity of the source content.
+- Resume only from a safely verified checkpoint.
+- Reconcile receiver-confirmed durable progress.
+- Never trust an offset supplied by an unauthenticated peer.
+- Do not append blindly to an existing destination.
+
+Resume must be implemented only after normal transfer integrity and state recovery are reliable.
+
+## 12. Error Model
+
+Errors must use stable machine-readable codes, with safe diagnostic descriptions.
+
+Required categories include:
+
+- `UNSUPPORTED_VERSION`
+- `INVALID_FRAME`
+- `MESSAGE_TOO_LARGE`
+- `AUTHENTICATION_FAILED`
+- `NOT_AUTHORIZED`
+- `TRANSFER_NOT_FOUND`
+- `TRANSFER_CANCELLED`
+- `INSUFFICIENT_STORAGE`
+- `INTEGRITY_FAILED`
+- `CONNECTION_LOST`
+- `TIMEOUT`
+- `RESOURCE_LIMIT`
+- `INTERNAL_ERROR`
+
+Never expose secrets, private keys, file contents, or unnecessary filesystem paths in remote error messages or logs.
+
+## 13. Testing and Benchmarks
+
+Required automated tests:
+
+- Header encoding and decoding across both implementations.
+- Partial TCP reads and writes.
+- Invalid, truncated, oversized, and malformed frames.
+- Unsupported versions and invalid state transitions.
+- Authentication failure and trust revocation.
+- Unauthorized transfer requests.
+- Cancellation and disconnect at different transfer stages.
+- Integrity mismatch and storage failures.
+- Bounded-memory behavior under slow receivers.
+- Reconnect and resume consistency.
+
+Required real-device benchmarks:
+
+- Small-file latency at multiple sizes.
+- Large-file sustained throughput.
+- Peak memory and CPU usage.
+- Hashing overhead.
+- Behavior under Wi-Fi interruptions and slow storage.
+- Multiple simultaneous transfers.
+
+Record the device, OS version, network conditions, file sizes, test repetitions, and measured results. Do not publish performance claims before testing.
+
+## 14. Implementation Gates
+
+1. Agree on and review the wire specification.
+2. Implement framing and parser tests.
+3. Implement authenticated TLS sessions and peer identity binding.
+4. Pass cross-platform interoperability tests.
+5. Implement bounded streaming and backpressure.
+6. Pass integrity, cancellation, and failure tests.
+7. Test on real Windows and Android devices.
+8. Add resume only after the preceding stages are reliable.
+
+This document defines intended behavior. It does not certify the implementation as secure, complete, or performant.
